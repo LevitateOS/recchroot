@@ -1,0 +1,15 @@
+[package]
+name = "recchroot"
+version = "0.1.0"
+edition = "2021"
+description = "Enter chroot with proper bind mounts (like arch-chroot)"
+license = "MIT"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.4", features = ["derive"] }
+nix = { version = "0.29", features = ["mount", "signal"] }
+
+[profile.release]
+strip = true
+lto = true
