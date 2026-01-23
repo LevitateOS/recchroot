@@ -2,7 +2,7 @@
 name = "recchroot"
 version = "0.1.2"
 edition = "2021"
-rust-version = "1.74"
+rust-version = "1.93"
 description = "Enter chroot with proper bind mounts (like arch-chroot)"
 license = "MIT"
 repository = "https://github.com/LevitateOS/recchroot"
