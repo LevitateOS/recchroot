@@ -23,9 +23,9 @@ jobs:
     with:
       msrv: '1.93'
       smoke-test-script: |
-        ./target/release/recchroot --help
-        ./target/release/recchroot --version
-        ./target/release/recchroot /nonexistent 2>&1 | grep -q "E001"
+        ./target/debug/recchroot --help
+        ./target/debug/recchroot --version
+        ./target/debug/recchroot /nonexistent 2>&1 | grep -q "E001"
 
   release:
     needs: [ci]
