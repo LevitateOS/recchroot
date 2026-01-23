@@ -71,6 +71,26 @@ This is intentional. LevitateOS is for users who want control, like Arch.
 - Linux only (uses Linux-specific mount syscalls)
 - Root privileges required
 - Target directory must contain a valid Linux filesystem
+- Target cannot be a protected system path (/, /usr, /etc, etc.)
+
+## Error Codes
+
+| Code | Exit | Description |
+|------|------|-------------|
+| E001 | 1 | Target directory does not exist |
+| E002 | 2 | Target is not a directory |
+| E003 | 3 | Failed to create mount point directory |
+| E004 | 4 | Mount operation failed |
+| E005 | 5 | Unmount operation failed (warning only) |
+| E006 | 6 | Command execution failed |
+| E007 | 7 | Must run as root |
+| E008 | 8 | Target is a protected system path |
+
+## Protected Paths
+
+These paths cannot be used as chroot targets:
+
+`/`, `/bin`, `/boot`, `/dev`, `/etc`, `/home`, `/lib`, `/lib64`, `/opt`, `/proc`, `/root`, `/run`, `/sbin`, `/srv`, `/sys`, `/tmp`, `/usr`, `/var`
 
 ## Building
 

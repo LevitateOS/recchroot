@@ -11,14 +11,16 @@
 //!
 //! ## Error Codes
 //!
-//! | Code | Description |
-//! |------|-------------|
-//! | E001 | Target directory does not exist |
-//! | E002 | Target is not a directory |
-//! | E003 | Failed to create mount point directory |
-//! | E004 | Mount operation failed |
-//! | E005 | Unmount operation failed (warning only) |
-//! | E006 | Command execution failed |
+//! | Code | Exit | Description |
+//! |------|------|-------------|
+//! | E001 | 1 | Target directory does not exist |
+//! | E002 | 2 | Target is not a directory |
+//! | E003 | 3 | Failed to create mount point directory |
+//! | E004 | 4 | Mount operation failed |
+//! | E005 | 5 | Unmount operation failed (warning only) |
+//! | E006 | 6 | Command execution failed |
+//! | E007 | 7 | Must run as root |
+//! | E008 | 8 | Target is a protected system path |
 
 use clap::Parser;
 use nix::mount::{mount, umount2, MntFlags, MsFlags};
@@ -60,6 +62,10 @@ pub enum ErrorCode {
     UnmountFailed,
     /// E006: Command execution failed
     CommandFailed,
+    /// E007: Must run as root
+    NotRoot,
+    /// E008: Target is a protected system path
+    ProtectedPath,
 }
 
 impl ErrorCode {
@@ -72,6 +78,22 @@ impl ErrorCode {
             ErrorCode::MountFailed => "E004",
             ErrorCode::UnmountFailed => "E005",
             ErrorCode::CommandFailed => "E006",
+            ErrorCode::NotRoot => "E007",
+            ErrorCode::ProtectedPath => "E008",
+        }
+    }
+
+    /// Get the exit code for this error.
+    pub fn exit_code(&self) -> u8 {
+        match self {
+            ErrorCode::TargetNotFound => 1,
+            ErrorCode::NotADirectory => 2,
+            ErrorCode::MkdirFailed => 3,
+            ErrorCode::MountFailed => 4,
+            ErrorCode::UnmountFailed => 5,
+            ErrorCode::CommandFailed => 6,
+            ErrorCode::NotRoot => 7,
+            ErrorCode::ProtectedPath => 8,
         }
     }
 }
@@ -136,6 +158,17 @@ impl RecError {
             format!("failed to execute chroot: {}", source),
         )
     }
+
+    pub fn not_root() -> Self {
+        Self::new(ErrorCode::NotRoot, "must run as root")
+    }
+
+    pub fn protected_path(path: &str) -> Self {
+        Self::new(
+            ErrorCode::ProtectedPath,
+            format!("'{}' is a protected system path", path),
+        )
+    }
 }
 
 impl fmt::Display for RecError {
@@ -163,6 +196,12 @@ const BIND_MOUNTS: &[(&str, &str)] = &[
 /// Optional mounts (only if source exists)
 const OPTIONAL_MOUNTS: &[&str] = &["/sys/firmware/efi/efivars"];
 
+/// Protected system paths that cannot be used as chroot targets
+const PROTECTED_PATHS: &[&str] = &[
+    "/", "/bin", "/boot", "/dev", "/etc", "/home", "/lib", "/lib64", "/opt", "/proc", "/root",
+    "/run", "/sbin", "/srv", "/sys", "/tmp", "/usr", "/var",
+];
+
 // =============================================================================
 // Main
 // =============================================================================
@@ -172,15 +211,34 @@ fn main() -> ExitCode {
         Ok(code) => ExitCode::from(code),
         Err(e) => {
             eprintln!("recchroot: {}", e);
-            ExitCode::from(1)
+            ExitCode::from(e.code.exit_code())
         }
     }
+}
+
+/// Helper to clean up mounts on exit or error
+fn cleanup_mounts(mounted: &[PathBuf]) {
+    for target in mounted.iter().rev() {
+        if let Err(e) = umount2(target, MntFlags::MNT_DETACH) {
+            eprintln!(
+                "recchroot: warning: E005: failed to unmount '{}': {}",
+                target.display(),
+                e
+            );
+        }
+    }
+}
+
+/// Check if a path is a protected system path
+fn is_protected_path(path: &Path) -> bool {
+    let path_str = path.to_string_lossy();
+    PROTECTED_PATHS.iter().any(|p| path_str == *p)
 }
 
 fn run() -> Result<u8> {
     let args = Args::parse();
 
-    // Validate empty/whitespace-only paths
+    // Validate empty/whitespace-only paths first (no root needed)
     let chroot_dir_str = args.chroot_dir.trim();
     if chroot_dir_str.is_empty() {
         return Err(RecError::target_not_found("<empty>"));
@@ -194,9 +252,23 @@ fn run() -> Result<u8> {
         return Err(RecError::not_a_directory(chroot_dir_str));
     }
 
+    // Canonicalize to resolve symlinks and ..
     let chroot_canonical = chroot_dir
         .canonicalize()
         .map_err(|e| RecError::new(ErrorCode::TargetNotFound, e.to_string()))?;
+
+    // Check protected paths AFTER canonicalization (catches symlinks to protected paths)
+    if is_protected_path(&chroot_canonical) {
+        return Err(RecError::protected_path(
+            &chroot_canonical.to_string_lossy(),
+        ));
+    }
+
+    // Check root privileges (needed for mount operations)
+    if !nix::unistd::geteuid().is_root() {
+        return Err(RecError::not_root());
+    }
+
     let mut mounted: Vec<PathBuf> = Vec::new();
 
     // Set up signal handlers for cleanup - ignore signals during mount setup
@@ -207,24 +279,32 @@ fn run() -> Result<u8> {
         let _ = signal(Signal::SIGQUIT, SigHandler::SigIgn);
     }
 
-    // Setup bind mounts
-    for (src, name) in BIND_MOUNTS {
-        let target = chroot_canonical.join(name);
+    // Setup bind mounts - cleanup on failure
+    let mount_result = (|| -> Result<()> {
+        for (src, name) in BIND_MOUNTS {
+            let target = chroot_canonical.join(name);
 
-        if !target.exists() {
-            fs::create_dir_all(&target).map_err(|e| RecError::mkdir_failed(&target, e))?;
+            if !target.exists() {
+                fs::create_dir_all(&target).map_err(|e| RecError::mkdir_failed(&target, e))?;
+            }
+
+            mount(
+                Some(Path::new(src)),
+                &target,
+                None::<&str>,
+                MsFlags::MS_BIND | MsFlags::MS_REC,
+                None::<&str>,
+            )
+            .map_err(|e| RecError::mount_failed(src, &target, e))?;
+
+            mounted.push(target);
         }
+        Ok(())
+    })();
 
-        mount(
-            Some(Path::new(src)),
-            &target,
-            None::<&str>,
-            MsFlags::MS_BIND | MsFlags::MS_REC,
-            None::<&str>,
-        )
-        .map_err(|e| RecError::mount_failed(src, &target, e))?;
-
-        mounted.push(target);
+    if let Err(e) = mount_result {
+        cleanup_mounts(&mounted);
+        return Err(e);
     }
 
     // Optional mounts (like efivars) - warn on failure but continue
@@ -290,19 +370,12 @@ fn run() -> Result<u8> {
         .arg(&chroot_canonical)
         .arg(cmd)
         .args(&cmd_args)
-        .status()
-        .map_err(RecError::command_failed)?;
+        .status();
 
-    // Cleanup: unmount in reverse order (always attempt, even on error)
-    for target in mounted.iter().rev() {
-        if let Err(e) = umount2(target, MntFlags::MNT_DETACH) {
-            eprintln!(
-                "recchroot: warning: E005: failed to unmount '{}': {}",
-                target.display(),
-                e
-            );
-        }
-    }
+    // Always cleanup, even if chroot failed
+    cleanup_mounts(&mounted);
+
+    let status = status.map_err(RecError::command_failed)?;
 
     Ok(status.code().unwrap_or(1) as u8)
 }
@@ -323,6 +396,20 @@ mod tests {
         assert_eq!(ErrorCode::MountFailed.code(), "E004");
         assert_eq!(ErrorCode::UnmountFailed.code(), "E005");
         assert_eq!(ErrorCode::CommandFailed.code(), "E006");
+        assert_eq!(ErrorCode::NotRoot.code(), "E007");
+        assert_eq!(ErrorCode::ProtectedPath.code(), "E008");
+    }
+
+    #[test]
+    fn test_exit_codes() {
+        assert_eq!(ErrorCode::TargetNotFound.exit_code(), 1);
+        assert_eq!(ErrorCode::NotADirectory.exit_code(), 2);
+        assert_eq!(ErrorCode::MkdirFailed.exit_code(), 3);
+        assert_eq!(ErrorCode::MountFailed.exit_code(), 4);
+        assert_eq!(ErrorCode::UnmountFailed.exit_code(), 5);
+        assert_eq!(ErrorCode::CommandFailed.exit_code(), 6);
+        assert_eq!(ErrorCode::NotRoot.exit_code(), 7);
+        assert_eq!(ErrorCode::ProtectedPath.exit_code(), 8);
     }
 
     #[test]
@@ -350,6 +437,8 @@ mod tests {
             ErrorCode::MountFailed,
             ErrorCode::UnmountFailed,
             ErrorCode::CommandFailed,
+            ErrorCode::NotRoot,
+            ErrorCode::ProtectedPath,
         ];
 
         let mut seen = std::collections::HashSet::new();
@@ -360,6 +449,16 @@ mod tests {
                 code.code()
             );
         }
+    }
+
+    #[test]
+    fn test_protected_paths() {
+        use std::path::Path;
+        assert!(is_protected_path(Path::new("/")));
+        assert!(is_protected_path(Path::new("/usr")));
+        assert!(is_protected_path(Path::new("/etc")));
+        assert!(!is_protected_path(Path::new("/mnt")));
+        assert!(!is_protected_path(Path::new("/mnt/chroot")));
     }
 
     #[test]
