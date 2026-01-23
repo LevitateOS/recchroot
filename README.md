@@ -68,6 +68,7 @@ This is intentional. LevitateOS is for users who want control, like Arch.
 
 ## Requirements
 
+- Linux only (uses Linux-specific mount syscalls)
 - Root privileges required
 - Target directory must contain a valid Linux filesystem
 
