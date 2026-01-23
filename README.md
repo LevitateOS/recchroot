@@ -2,6 +2,37 @@
 
 LevitateOS chroot helper. Like `arch-chroot` for Arch Linux - sets up bind mounts and enters chroot properly.
 
+## Status
+
+| Metric | Value |
+|--------|-------|
+| Stage | Beta |
+| Target | x86_64 Linux |
+| Last verified | 2026-01-23 |
+
+### Works
+
+- Bind mounts for /proc, /sys, /dev, /run, efivars
+- DNS resolution via resolv.conf copy
+- Automatic cleanup on exit
+- Protected path blocking
+
+### Known Issues
+
+- See parent repo issues
+
+---
+
+## Author
+
+<!-- HUMAN WRITTEN - DO NOT MODIFY -->
+
+[Waiting for human input]
+
+<!-- END HUMAN WRITTEN -->
+
+---
+
 **You run commands inside the chroot yourself.** This tool enters chroot, nothing more.
 
 ## Usage
