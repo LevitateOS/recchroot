@@ -1,56 +1,49 @@
-# CLAUDE.md - Recchroot
-
-## STOP. READ. THEN ACT.
-
-Before modifying this crate, read `src/main.rs` to understand the chroot setup logic.
-
----
+# CLAUDE.md - recchroot
 
 ## What is recchroot?
 
 LevitateOS chroot helper. **Like arch-chroot, NOT like an installer.**
 
-Sets up bind mounts (/dev, /proc, /sys, /run), enters chroot, cleans up on exit. That's it.
-User runs commands inside chroot manually.
+Sets up bind mounts, enters chroot, cleans up on exit. User runs commands inside.
 
-## Development
+## What Belongs Here
+
+- Bind mount setup (/dev, /proc, /sys, /run)
+- Chroot entry/exit
+- Cleanup on error/signal
+
+## What Does NOT Belong Here
+
+| Don't put here | Put it in |
+|----------------|-----------|
+| System extraction | `tools/recstrap/` |
+| Fstab generation | `tools/recfstab/` |
+| Automatic installation | User does manually |
+
+## Commands
 
 ```bash
-cargo build --release    # LTO + strip enabled
+cargo build --release
 cargo clippy
 ```
 
-## Key Rules
-
-1. **recchroot = arch-chroot** - Just enter chroot properly, nothing else
-2. **Keep it simple** - ~100 lines, one job
-3. **No automation** - User runs commands manually inside chroot
-4. **Always cleanup** - Unmount bind mounts even on error/signal
-
-## What recchroot does
+## Usage
 
 ```bash
-recchroot /mnt              # Interactive shell in chroot
-recchroot /mnt passwd       # Run single command in chroot
-recchroot /mnt bootctl install  # Run bootloader install in chroot
+recchroot /mnt              # Interactive shell
+recchroot /mnt passwd       # Run single command
+recchroot /mnt bootctl install
 ```
 
-## What recchroot does NOT do
+## Mounts Created
 
-- Run installation commands automatically
-- Configure the system (user does that)
-- Install bootloader (user does that)
-- Any other installation step
+1. `/proc` -> `<target>/proc`
+2. `/sys` -> `<target>/sys`
+3. `/dev` -> `<target>/dev`
+4. `/run` -> `<target>/run`
+5. `/sys/firmware/efi/efivars` -> `<target>/sys/firmware/efi/efivars` (if exists)
+6. Copies `/etc/resolv.conf` for DNS
 
-## Mounts set up
+## Key Rule
 
-1. `/proc` -> `<chroot>/proc`
-2. `/sys` -> `<chroot>/sys`
-3. `/dev` -> `<chroot>/dev`
-4. `/run` -> `<chroot>/run`
-5. `/sys/firmware/efi/efivars` -> `<chroot>/sys/firmware/efi/efivars` (if exists)
-6. Copies `/etc/resolv.conf` for DNS resolution
-
-## Testing
-
-Test in QEMU with a mounted target directory, verify mounts are created and cleaned up.
+Always cleanup mounts, even on error or signal.
