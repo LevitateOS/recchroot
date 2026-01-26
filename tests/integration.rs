@@ -3,6 +3,7 @@
 //! These tests run the actual binary and verify behavior.
 //! Note: Actual chroot/mount tests require root and are marked #[ignore].
 
+use leviso_cheat_test::cheat_aware;
 use std::process::Command;
 
 /// Helper to run recchroot with given args
@@ -143,6 +144,15 @@ fn test_path_with_special_characters() {
 // Root and Permission Tests (E007, E008)
 // =============================================================================
 
+#[cheat_aware(
+    protects = "Only root can perform chroot operations (security boundary)",
+    severity = "HIGH",
+    ease = "EASY",
+    cheats = ["Remove root check entirely", "Add --no-root-check flag"],
+    consequence = "Unprivileged users attempt chroot and get cryptic permission errors on bind mounts",
+    legitimate_change = "Root requirement is fundamental to chroot. \
+        This check should never be bypassed."
+)]
 #[test]
 fn test_not_root() {
     // When not running as root, should fail with E007
@@ -168,6 +178,15 @@ fn test_not_root() {
     );
 }
 
+#[cheat_aware(
+    protects = "User cannot chroot into root filesystem and corrupt running system",
+    severity = "CRITICAL",
+    ease = "EASY",
+    cheats = ["Remove / from protected paths", "Skip protection check when path looks valid"],
+    consequence = "User runs 'recchroot /' and corrupts their running system with bind mounts",
+    legitimate_change = "The root filesystem should NEVER be a valid chroot target. \
+        If this test fails, fix the protected path validation in src/main.rs"
+)]
 #[test]
 fn test_protected_path_root() {
     // Test that / is protected - E008 should come before E007 now
@@ -186,6 +205,15 @@ fn test_protected_path_root() {
     );
 }
 
+#[cheat_aware(
+    protects = "System directories are never valid chroot targets",
+    severity = "CRITICAL",
+    ease = "EASY",
+    cheats = ["Remove /usr from protected paths", "Allow chroot to any existing directory"],
+    consequence = "User runs 'recchroot /usr' and corrupts system binaries",
+    legitimate_change = "System directories should NEVER be valid chroot targets. \
+        If this test fails, fix the protected path list in src/main.rs"
+)]
 #[test]
 fn test_protected_path_usr() {
     let output = run_recchroot(&["/usr"]);
@@ -203,6 +231,15 @@ fn test_protected_path_usr() {
     );
 }
 
+#[cheat_aware(
+    protects = "Exit codes match error codes for scriptable error handling",
+    severity = "MEDIUM",
+    ease = "MEDIUM",
+    cheats = ["Return 1 for all errors", "Return 0 and only report via stderr"],
+    consequence = "Scripts cannot distinguish error types, automation breaks",
+    legitimate_change = "Exit codes must match error codes (E001 = exit 1, E002 = exit 2). \
+        If adding new errors, ensure the exit code matches the error number."
+)]
 #[test]
 fn test_exit_code_matches_error() {
     // E001 should return exit code 1
