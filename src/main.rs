@@ -23,6 +23,9 @@
 //! | E008 | 8 | Target is a protected system path |
 
 use clap::Parser;
+use distro_spec::impl_error_code_display;
+use distro_spec::shared::error::ToolErrorCode;
+use distro_spec::shared::is_root;
 use nix::mount::{mount, umount2, MntFlags, MsFlags};
 use nix::sys::signal::{signal, SigHandler, Signal};
 use std::fmt;
@@ -68,9 +71,8 @@ pub enum ErrorCode {
     ProtectedPath,
 }
 
-impl ErrorCode {
-    /// Get the numeric code as a string (e.g., "E001").
-    pub fn code(&self) -> &'static str {
+impl ToolErrorCode for ErrorCode {
+    fn code(&self) -> &'static str {
         match self {
             ErrorCode::TargetNotFound => "E001",
             ErrorCode::NotADirectory => "E002",
@@ -83,8 +85,7 @@ impl ErrorCode {
         }
     }
 
-    /// Get the exit code for this error.
-    pub fn exit_code(&self) -> u8 {
+    fn exit_code(&self) -> u8 {
         match self {
             ErrorCode::TargetNotFound => 1,
             ErrorCode::NotADirectory => 2,
@@ -98,11 +99,7 @@ impl ErrorCode {
     }
 }
 
-impl fmt::Display for ErrorCode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.code())
-    }
-}
+impl_error_code_display!(ErrorCode);
 
 /// A recchroot error with code and context.
 #[derive(Debug)]
@@ -196,8 +193,8 @@ const BIND_MOUNTS: &[(&str, &str)] = &[
 /// Optional mounts (only if source exists)
 const OPTIONAL_MOUNTS: &[&str] = &["/sys/firmware/efi/efivars"];
 
-// Use PROTECTED_PATHS from distro-spec (single source of truth)
-use distro_spec::shared::PROTECTED_PATHS;
+// Note: PROTECTED_PATHS is now in distro-spec::shared (single source of truth).
+// Use is_protected_path() imported below.
 
 // =============================================================================
 // Main
@@ -259,7 +256,7 @@ fn run() -> Result<u8> {
     }
 
     // Check root privileges (needed for mount operations)
-    if !nix::unistd::geteuid().is_root() {
+    if !is_root() {
         return Err(RecError::not_root());
     }
 
