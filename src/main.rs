@@ -196,11 +196,8 @@ const BIND_MOUNTS: &[(&str, &str)] = &[
 /// Optional mounts (only if source exists)
 const OPTIONAL_MOUNTS: &[&str] = &["/sys/firmware/efi/efivars"];
 
-/// Protected system paths that cannot be used as chroot targets
-const PROTECTED_PATHS: &[&str] = &[
-    "/", "/bin", "/boot", "/dev", "/etc", "/home", "/lib", "/lib64", "/opt", "/proc", "/root",
-    "/run", "/sbin", "/srv", "/sys", "/tmp", "/usr", "/var",
-];
+// Use PROTECTED_PATHS from distro-spec (single source of truth)
+use distro_spec::shared::PROTECTED_PATHS;
 
 // =============================================================================
 // Main
@@ -229,11 +226,8 @@ fn cleanup_mounts(mounted: &[PathBuf]) {
     }
 }
 
-/// Check if a path is a protected system path
-fn is_protected_path(path: &Path) -> bool {
-    let path_str = path.to_string_lossy();
-    PROTECTED_PATHS.iter().any(|p| path_str == *p)
-}
+// Use is_protected_path from distro-spec (single source of truth)
+use distro_spec::shared::is_protected_path;
 
 fn run() -> Result<u8> {
     let args = Args::parse();
